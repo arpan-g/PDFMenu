@@ -1,6 +1,5 @@
 package com.vardhanni.pdfmenu
 
-import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.Toast
@@ -9,20 +8,71 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
-import androidx.compose.foundation.layout.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Compress
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.FileProvider
 import androidx.fragment.app.FragmentContainerView
@@ -88,58 +138,190 @@ class MainActivity : AppCompatActivity() {
     fun PdfMenuScreen(viewModel: PdfViewModel) {
         var passwordInput by remember { mutableStateOf("") }
         var passwordVisible by remember { mutableStateOf(false) }
+        val containerId = remember { View.generateViewId() }
+        val pulseTransition = rememberInfiniteTransition(label = "openButtonPulse")
+        val openButtonScale by pulseTransition.animateFloat(
+            initialValue = 1f,
+            targetValue = 1.05f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1200, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "openButtonScale"
+        )
 
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("PDF Menu") },
+                    title = {
+                        Column {
+                            Text("PDF Unlock Studio", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "Unlock, preview, and optimize securely",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+                            )
+                        }
+                    },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        titleContentColor = MaterialTheme.colorScheme.onPrimary
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 )
             },
-            floatingActionButton = {
-                Column(
-                    modifier = Modifier.padding(start = 32.dp, bottom = 32.dp),
-                    horizontalAlignment = Alignment.Start
-                ) {
-                    if (viewModel.isSaveVisible) {
-                        SmallFloatingActionButton(
-                            onClick = { viewModel.showCompressDialog = true },
-                            modifier = Modifier.padding(bottom = 16.dp),
-                            containerColor = MaterialTheme.colorScheme.tertiaryContainer
-                        ) {
-                            Icon(Icons.Default.Compress, "Compress")
-                        }
-                        SmallFloatingActionButton(
-                            onClick = { savePdfLauncher.launch("unprotected_document.pdf") },
-                            modifier = Modifier.padding(bottom = 16.dp),
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer
-                        ) {
-                            Icon(painterResource(android.R.drawable.ic_menu_save), "Save")
-                        }
-                    }
-                    ExtendedFloatingActionButton(
-                        onClick = { pickPdfLauncher.launch(arrayOf("application/pdf")) },
-                        icon = { Icon(Icons.Default.Search, "Open") },
-                        text = { Text("Open PDF") }
-                    )
-                }
-            },
-            floatingActionButtonPosition = FabPosition.Start
+            containerColor = MaterialTheme.colorScheme.surface
         ) { innerPadding ->
-            Box(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .padding(innerPadding)
+                    .fillMaxSize()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .alpha(0.2f)
+                        .background(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                                    Color.Transparent,
+                                    MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)
+                                )
+                            )
+                        )
+                )
+
                 AndroidView(
                     factory = { context ->
                         FragmentContainerView(context).apply {
-                            val generatedId = View.generateViewId()
-                            id = generatedId
-                            fragmentContainerId = generatedId
+                            id = containerId
+                            fragmentContainerId = containerId
                         }
                     },
                     modifier = Modifier.fillMaxSize()
                 )
+
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(16.dp)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Card(
+                        shape = RoundedCornerShape(24.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.93f)
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(20.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(Icons.Default.LockOpen, contentDescription = null)
+                                Text(
+                                    text = "Secure PDF Toolkit",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Crossfade(targetState = viewModel.isSaveVisible, label = "infoTextCrossfade") { isReady ->
+                                Text(
+                                    text = if (isReady) {
+                                        "Your PDF is ready. Save it or tune compression for a smaller file."
+                                    } else {
+                                        "Select a locked PDF to unlock and preview it instantly."
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Card(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = 16.dp, vertical = 18.dp)
+                        .fillMaxWidth(),
+                    shape = RoundedCornerShape(28.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f)
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 10.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Button(
+                            onClick = { pickPdfLauncher.launch(arrayOf("application/pdf")) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .scale(if (viewModel.isSaveVisible) 1f else openButtonScale),
+                            shape = RoundedCornerShape(18.dp),
+                            contentPadding = PaddingValues(vertical = 14.dp)
+                        ) {
+                            Icon(Icons.Default.Search, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Choose PDF", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        }
+
+                        AnimatedVisibility(
+                            visible = viewModel.isSaveVisible,
+                            enter = fadeIn(tween(300)) + slideInVertically(initialOffsetY = { it / 2 }),
+                            exit = fadeOut(tween(200)) + slideOutVertically(targetOffsetY = { it / 2 })
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Button(
+                                    onClick = { savePdfLauncher.launch("unprotected_document.pdf") },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                    ),
+                                    shape = RoundedCornerShape(16.dp)
+                                ) {
+                                    Icon(painterResource(android.R.drawable.ic_menu_save), contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Save")
+                                }
+
+                                Button(
+                                    onClick = { viewModel.showCompressDialog = true },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                                    ),
+                                    shape = RoundedCornerShape(16.dp)
+                                ) {
+                                    Icon(Icons.Default.Speed, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Compress")
+                                }
+                            }
+                        }
+
+                        if (!viewModel.isSaveVisible) {
+                            Text(
+                                text = "Open a PDF to unlock advanced actions",
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = TextAlign.Center,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
             }
         }
 
