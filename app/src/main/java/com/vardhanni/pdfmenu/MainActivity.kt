@@ -59,6 +59,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.res.painterResource
@@ -146,24 +147,6 @@ class MainActivity : AppCompatActivity() {
         )
 
         Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = {
-                        Column {
-                            Text("PDF Unlock Studio", fontWeight = FontWeight.SemiBold)
-                            Text(
-                                "Unlock, preview, and optimize securely",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                )
-            },
             containerColor = MaterialTheme.colorScheme.surface
         ) { innerPadding ->
             Column(
@@ -173,21 +156,9 @@ class MainActivity : AppCompatActivity() {
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Crossfade(targetState = viewModel.isSaveVisible, label = "infoTextCrossfade") { isReady ->
-                    Text(
-                        text = if (isReady) {
-                            "Your PDF is ready. Save it or tune compression for a smaller file."
-                        } else {
-                            "Select a locked PDF to unlock and preview it instantly."
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
                 Card(
                     modifier = Modifier
-                        .weight(1f)
+                        .weight(1f, fill = true)
                         .fillMaxWidth(),
                     shape = RoundedCornerShape(24.dp),
                     colors = CardDefaults.cardColors(
