@@ -2,4 +2,13 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- Modern Dark Palette -->
+    <color name="deep_blue">#1A1C1E</color>
+    <color name="surface_dark">#111318</color>
+    <color name="primary_blue">#D1E4FF</color>
+    <color name="secondary_blue">#BBC7DB</color>
+    <color name="tertiary_blue">#D7BDE7</color>
+    <color name="on_surface_dark">#E2E2E6</color>
+    <color name="on_surface_variant_dark">#C4C6D0</color>
 </resources>
