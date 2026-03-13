@@ -66,6 +66,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.compose.foundation.layout)
+    implementation(libs.androidx.compose.ui.text)
+    implementation(libs.androidx.benchmark.traceprocessor)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

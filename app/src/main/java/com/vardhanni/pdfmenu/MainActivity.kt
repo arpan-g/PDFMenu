@@ -20,7 +20,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -60,12 +59,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -171,84 +166,50 @@ class MainActivity : AppCompatActivity() {
             },
             containerColor = MaterialTheme.colorScheme.surface
         ) { innerPadding ->
-            Box(
+            Column(
                 modifier = Modifier
                     .padding(innerPadding)
                     .fillMaxSize()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .alpha(0.2f)
-                        .background(
-                            brush = Brush.verticalGradient(
-                                colors = listOf(
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-                                    Color.Transparent,
-                                    MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)
-                                )
-                            )
-                        )
-                )
-
-                AndroidView(
-                    factory = { context ->
-                        FragmentContainerView(context).apply {
-                            id = containerId
-                            fragmentContainerId = containerId
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(16.dp)
-                        .fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Card(
-                        shape = RoundedCornerShape(24.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.93f)
-                        ),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(20.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(Icons.Default.LockOpen, contentDescription = null)
-                                Text(
-                                    text = "Secure PDF Toolkit",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Crossfade(targetState = viewModel.isSaveVisible, label = "infoTextCrossfade") { isReady ->
-                                Text(
-                                    text = if (isReady) {
-                                        "Your PDF is ready. Save it or tune compression for a smaller file."
-                                    } else {
-                                        "Select a locked PDF to unlock and preview it instantly."
-                                    },
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                            }
-                        }
-                    }
+                Crossfade(targetState = viewModel.isSaveVisible, label = "infoTextCrossfade") { isReady ->
+                    Text(
+                        text = if (isReady) {
+                            "Your PDF is ready. Save it or tune compression for a smaller file."
+                        } else {
+                            "Select a locked PDF to unlock and preview it instantly."
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 Card(
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(horizontal = 16.dp, vertical = 18.dp)
+                        .weight(1f)
                         .fillMaxWidth(),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                ) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        AndroidView(
+                            factory = { context ->
+                                FragmentContainerView(context).apply {
+                                    id = containerId
+                                    fragmentContainerId = containerId
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(28.dp),
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f)
@@ -324,6 +285,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+
 
         if (viewModel.showPasswordDialog) {
             AlertDialog(
