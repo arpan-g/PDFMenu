@@ -1,6 +1,7 @@
 package com.vardhanni.pdfmenu
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.View
@@ -29,14 +30,23 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Visibility
@@ -48,19 +58,23 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -68,10 +82,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -114,8 +130,7 @@ import java.util.Locale
 class MainActivity : AppCompatActivity() {
 
     private var rewardedAd: RewardedAd? = null
-    private var freeActionsRemaining = 1
-    private var currentFileName: String? = null
+    private var lastGrantedUri: Uri? = null
 
     private companion object {
         const val TEST_BANNER_AD_UNIT_ID = "ca-app-pub-3940256099942544/9214589741"
@@ -130,9 +145,9 @@ class MainActivity : AppCompatActivity() {
 
     private val pickPdfLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let {
-            currentFileName = getFileName(it)
+            val fileName = getFileName(it)
             clearPdfViewer()
-            viewModel.onFilePicked(it)
+            viewModel.onFilePicked(it, fileName)
         }
     }
 
@@ -173,7 +188,11 @@ class MainActivity : AppCompatActivity() {
     @Composable
     fun PdfMenuScreen(viewModel: PdfViewModel) {
         var passwordInput by remember { mutableStateOf("") }
+        var lockPasswordInput by remember { mutableStateOf("") }
         var passwordVisible by remember { mutableStateOf(false) }
+        var showToolsSheet by remember { mutableStateOf(false) }
+        val sheetState = rememberModalBottomSheetState()
+        
         val containerId = remember { View.generateViewId() }
         val pulseTransition = rememberInfiniteTransition(label = "openButtonPulse")
         val openButtonScale by pulseTransition.animateFloat(
@@ -216,6 +235,7 @@ class MainActivity : AppCompatActivity() {
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    // PDF Preview Card
                     Card(
                         modifier = Modifier
                             .weight(1f, fill = true)
@@ -225,7 +245,7 @@ class MainActivity : AppCompatActivity() {
                         colors = CardDefaults.cardColors(containerColor = GlassWhite),
                         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                     ) {
-                        Box(modifier = Modifier.fillMaxSize()) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             AndroidView(
                                 factory = { context ->
                                     FragmentContainerView(context).apply {
@@ -233,11 +253,47 @@ class MainActivity : AppCompatActivity() {
                                         fragmentContainerId = containerId
                                     }
                                 },
-                                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp))
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(24.dp))
+                                    .alpha(if (viewModel.isSaveVisible) 1f else 0f)
                             )
+
+                            if (!viewModel.isSaveVisible) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(32.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Description,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(64.dp),
+                                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                                    )
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text(
+                                        text = "PDF Preview Area",
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = "Use this zone to visualize and review tool outputs.\n\nNote: This is a preview intended for quick verification. For a superior reading experience, we recommend using a dedicated PDF reader application.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.alpha(0.8f)
+                                    )
+                                }
+                            }
                         }
                     }
 
+                    // Action Card
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -267,46 +323,61 @@ class MainActivity : AppCompatActivity() {
                                 Text("Choose PDF", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             }
 
-                            AnimatedVisibility(visible = viewModel.isSaveVisible) {
+                            AnimatedVisibility(
+                                visible = viewModel.isSaveVisible,
+                                enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
+                                exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 })
+                            ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
                                     Button(
-                                        onClick = { 
-                                            showAdIfNecessary { 
-                                                val name = currentFileName?.removeSuffix(".pdf") ?: "document"
-                                                val isCompressed = viewModel.tempPdfFile?.name?.contains("compressed") == true
-                                                val suffix = if (isCompressed) "_compressed" else "_unlocked"
-                                                savePdfLauncher.launch("$name$suffix.pdf")
-                                            } 
-                                        },
+                                        onClick = { showToolsSheet = true },
                                         modifier = Modifier.weight(1f),
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.secondary,
-                                            contentColor = MaterialTheme.colorScheme.onSecondary
-                                        ),
                                         shape = RoundedCornerShape(16.dp),
-                                        contentPadding = PaddingValues(vertical = 12.dp)
-                                    ) {
-                                        Icon(painterResource(android.R.drawable.ic_menu_save), contentDescription = null)
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("Save")
-                                    }
-
-                                    Button(
-                                        onClick = { viewModel.showCompressDialog = true },
-                                        modifier = Modifier.weight(1f),
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = MaterialTheme.colorScheme.tertiary,
                                             contentColor = MaterialTheme.colorScheme.onTertiary
                                         ),
-                                        shape = RoundedCornerShape(16.dp),
                                         contentPadding = PaddingValues(vertical = 12.dp)
                                     ) {
-                                        Icon(Icons.Default.Speed, contentDescription = null)
+                                        Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(18.dp))
                                         Spacer(Modifier.width(8.dp))
-                                        Text("Compress")
+                                        Text("Tools")
+                                    }
+
+                                    Button(
+                                        onClick = { 
+                                            showAdIfNecessary { 
+                                                val name = viewModel.currentFileName?.removeSuffix(".pdf") ?: "document"
+                                                val isCompressed = viewModel.tempPdfFile?.name?.contains("compressed") == true
+                                                val isLocked = viewModel.tempPdfFile?.name?.contains("locked") == true
+                                                val isUnlocked = viewModel.tempPdfFile?.name?.contains("temp_render") == true
+                                                
+                                                val suffix = when {
+                                                    isCompressed -> "_compressed"
+                                                    isLocked -> "_protected"
+                                                    isUnlocked -> "_unlocked"
+                                                    else -> "_processed"
+                                                }
+                                                savePdfLauncher.launch("$name$suffix.pdf")
+                                            } 
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                        enabled = viewModel.isSaveEnabled,
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.secondary,
+                                            contentColor = MaterialTheme.colorScheme.onSecondary,
+                                            disabledContainerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f),
+                                            disabledContentColor = MaterialTheme.colorScheme.onSecondary.copy(alpha = 0.3f)
+                                        ),
+                                        contentPadding = PaddingValues(vertical = 12.dp)
+                                    ) {
+                                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Save")
                                     }
                                 }
                             }
@@ -322,6 +393,68 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // Tools Bottom Sheet
+        if (showToolsSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showToolsSheet = false },
+                sheetState = sheetState,
+                containerColor = DeepBlue,
+                contentColor = Color.White,
+                scrimColor = Color.Black.copy(alpha = 0.6f)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 24.dp)
+                        .padding(horizontal = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Text(
+                        text = "PDF Tools",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                    
+                    ToolItem(
+                        icon = Icons.Default.LockOpen,
+                        title = "Unlock PDF",
+                        description = "Permanently remove password protection from this file",
+                        enabled = viewModel.wasEncrypted,
+                        onClick = {
+                            showToolsSheet = false
+                            val name = viewModel.currentFileName?.removeSuffix(".pdf") ?: "document"
+                            savePdfLauncher.launch("${name}_unlocked.pdf")
+                        }
+                    )
+
+                    ToolItem(
+                        icon = Icons.Default.Lock,
+                        title = "Lock PDF",
+                        description = "Apply a secure password to protect this document",
+                        enabled = true,
+                        onClick = {
+                            showToolsSheet = false
+                            viewModel.showLockDialog = true
+                        }
+                    )
+
+                    ToolItem(
+                        icon = Icons.Default.Speed,
+                        title = "Compress PDF",
+                        description = "Reduce file size by optimizing internal images",
+                        enabled = true,
+                        onClick = {
+                            showToolsSheet = false
+                            viewModel.onCompressDialogOpened()
+                            viewModel.showCompressDialog = true
+                        }
+                    )
                 }
             }
         }
@@ -360,6 +493,47 @@ class MainActivity : AppCompatActivity() {
                         viewModel.showPasswordDialog = false
                         passwordInput = ""
                     }) { Text("Cancel") }
+                }
+            )
+        }
+
+        if (viewModel.showLockDialog) {
+            AlertDialog(
+                onDismissRequest = { viewModel.showLockDialog = false },
+                title = { Text("Set PDF Password") },
+                text = {
+                    TextField(
+                        value = lockPasswordInput,
+                        onValueChange = { lockPasswordInput = it },
+                        label = { Text("Password") },
+                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                Icon(
+                                    imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = "Toggle visibility"
+                                )
+                            }
+                        },
+                        singleLine = true
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            viewModel.lockPdf(lockPasswordInput)
+                            lockPasswordInput = ""
+                        },
+                        enabled = lockPasswordInput.isNotEmpty() && !viewModel.isLocking
+                    ) {
+                        if (viewModel.isLocking) CircularProgressIndicator(modifier = Modifier.size(16.dp))
+                        else Text("Lock")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.showLockDialog = false; lockPasswordInput = "" }) {
+                        Text("Cancel")
+                    }
                 }
             )
         }
@@ -405,6 +579,35 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    @Composable
+    private fun ToolItem(
+        icon: ImageVector,
+        title: String,
+        description: String,
+        enabled: Boolean,
+        onClick: () -> Unit
+    ) {
+        val alpha = if (enabled) 1f else 0.4f
+        Card(
+            onClick = { if (enabled) onClick() },
+            colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.05f * alpha)),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth().alpha(alpha)
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(16.dp))
+                Column {
+                    Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(description, fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f))
+                }
+            }
+        }
+    }
+
     private fun getFileName(uri: android.net.Uri): String? {
         var result: String? = null
         if (uri.scheme == "content") {
@@ -442,8 +645,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showAdIfNecessary(onAction: () -> Unit) {
-        if (freeActionsRemaining > 0) {
-            freeActionsRemaining--
+        if (viewModel.freeActionsRemaining > 0) {
+            viewModel.freeActionsRemaining--
             onAction()
             return
         }
@@ -477,8 +680,11 @@ class MainActivity : AppCompatActivity() {
     private fun clearPdfViewer() {
         if (fragmentContainerId == View.NO_ID) return
         val fragmentManager = supportFragmentManager
+        if (fragmentManager.isStateSaved) return
         val fragment = fragmentManager.findFragmentById(fragmentContainerId)
-        if (fragment != null) fragmentManager.beginTransaction().remove(fragment).commitNow()
+        if (fragment != null) {
+            fragmentManager.beginTransaction().remove(fragment).commitAllowingStateLoss()
+        }
     }
 
     private fun showPdf(file: File) {
@@ -487,7 +693,10 @@ class MainActivity : AppCompatActivity() {
 
         val authority = "${packageName}.provider"
         val contentUri = FileProvider.getUriForFile(this, authority, file)
+        
+        lastGrantedUri?.let { revokeUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
         grantUriPermission(packageName, contentUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        lastGrantedUri = contentUri
 
         val pdfViewerFragment = PdfViewerFragment()
         pdfViewerFragment.lifecycle.addObserver(object : LifecycleEventObserver {
@@ -504,8 +713,11 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        supportFragmentManager.beginTransaction()
-            .replace(fragmentContainerId, pdfViewerFragment)
-            .commitAllowingStateLoss()
+        val fragmentManager = supportFragmentManager
+        if (!fragmentManager.isStateSaved) {
+            fragmentManager.beginTransaction()
+                .replace(fragmentContainerId, pdfViewerFragment)
+                .commitAllowingStateLoss()
+        }
     }
 }

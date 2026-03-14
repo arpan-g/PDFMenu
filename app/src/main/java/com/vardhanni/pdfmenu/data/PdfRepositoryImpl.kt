@@ -6,6 +6,8 @@ import android.net.Uri
 import com.tom_roush.pdfbox.cos.COSBase
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.encryption.AccessPermission
+import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.vardhanni.pdfmenu.domain.repository.PdfRepository
 import kotlinx.coroutines.Dispatchers
@@ -45,31 +47,28 @@ class PdfRepositoryImpl(
         }
     }
 
-    /**
-     * Improved Compression: Object-Level Image Compression with deduplication.
-     * Prevents "can't compress a recycled bitmap" by tracking processed images.
-     */
     override suspend fun compressPdf(sourceFile: File, quality: Float): Result<File> = withContext(Dispatchers.IO) {
         var document: PDDocument? = null
+        val compressedFile = File(cacheDir, "compressed_${System.currentTimeMillis()}.pdf")
+        
         try {
             val memorySetting = MemoryUsageSetting.setupTempFileOnly()
             document = PDDocument.load(sourceFile, memorySetting)
             
-            // Track processed images by their COSObject to avoid re-compressing 
-            // shared images (like logos) and hitting the "recycled bitmap" error.
             val processedImages = mutableMapOf<COSBase, PDImageXObject>()
+            val outputStream = ByteArrayOutputStream()
             
             for (page in document.pages) {
                 if (!coroutineContext.isActive) throw Exception("Cancelled")
                 
                 val resources = page.resources ?: continue
                 for (name in resources.xObjectNames) {
-                    val xObject = resources.getXObject(name)
+                    if (!coroutineContext.isActive) throw Exception("Cancelled")
                     
+                    val xObject = resources.getXObject(name)
                     if (xObject is PDImageXObject) {
                         val cosObject = xObject.cosObject
                         
-                        // Check if we've already compressed this specific image object
                         if (processedImages.containsKey(cosObject)) {
                             resources.put(name, processedImages[cosObject])
                             continue
@@ -78,42 +77,54 @@ class PdfRepositoryImpl(
                         val bitmap = xObject.image
                         if (bitmap.isRecycled) continue
 
-                        val out = ByteArrayOutputStream()
+                        outputStream.reset()
                         val androidQuality = (quality * 100).toInt().coerceIn(10, 100)
                         
-                        // Perform compression
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, androidQuality, out)
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, androidQuality, outputStream)
                         
                         val compressedImage = PDImageXObject.createFromByteArray(
                             document, 
-                            out.toByteArray(), 
+                            outputStream.toByteArray(), 
                             name.name
                         )
                         
-                        // Update the reference in resources and track it
                         resources.put(name, compressedImage)
                         processedImages[cosObject] = compressedImage
-                        
-                        // We don't manually recycle the bitmap here because PDFBox 
-                        // might manage its lifecycle or share it across objects.
-                        // Android's GC will handle it more safely.
                     }
                 }
             }
 
-            // Clean up metadata
             document.documentInformation.title = null
             document.documentInformation.producer = "PDFMenu"
             
-            val compressedFile = File(cacheDir, "compressed_${System.currentTimeMillis()}.pdf")
             document.save(compressedFile)
             Result.success(compressedFile)
         } catch (e: Exception) {
+            if (compressedFile.exists()) compressedFile.delete()
             Result.failure(e)
         } finally {
             try {
                 document?.close()
             } catch (e: Exception) {}
+        }
+    }
+
+    override suspend fun lockPdf(sourceFile: File, password: String): Result<File> = withContext(Dispatchers.IO) {
+        var document: PDDocument? = null
+        val lockedFile = File(cacheDir, "locked_${System.currentTimeMillis()}.pdf")
+        try {
+            document = PDDocument.load(sourceFile)
+            val ap = AccessPermission()
+            val spp = StandardProtectionPolicy(password, password, ap)
+            spp.encryptionKeyLength = 128
+            document.protect(spp)
+            document.save(lockedFile)
+            Result.success(lockedFile)
+        } catch (e: Exception) {
+            if (lockedFile.exists()) lockedFile.delete()
+            Result.failure(e)
+        } finally {
+            document?.close()
         }
     }
 }

@@ -32,47 +32,72 @@ class PdfViewModel(
 ) : ViewModel() {
 
     var currentPdfUri by mutableStateOf<Uri?>(null)
+    var currentFileName by mutableStateOf<String?>(null)
+    var freeActionsRemaining by mutableStateOf(1)
+    
     var tempPdfFile by mutableStateOf<File?>(null)
     private var originalUnlockedFile: File? = null
     var compressedPdfFile by mutableStateOf<File?>(null)
     
     var isSaveVisible by mutableStateOf(false)
+    var isSaveEnabled by mutableStateOf(false)
     var showPasswordDialog by mutableStateOf(false)
     var isRetryPassword by mutableStateOf(false)
     var showCompressDialog by mutableStateOf(false)
+    var showLockDialog by mutableStateOf(false)
+    var wasEncrypted by mutableStateOf(false)
+    
     var compressionQuality by mutableFloatStateOf(0.5f)
     var compressedFileSize by mutableLongStateOf(0L)
     var isCompressing by mutableStateOf(false)
+    var isLocking by mutableStateOf(false)
 
     private var compressionJob: Job? = null
+    private var latestCompressionRequestId: Long = 0
 
     private val _uiEvents = MutableSharedFlow<PdfUiEvent>()
     val uiEvents = _uiEvents.asSharedFlow()
 
-    fun onFilePicked(uri: Uri) {
+    fun onFilePicked(uri: Uri, fileName: String?) {
         currentPdfUri = uri
+        currentFileName = fileName
         isSaveVisible = false
+        isSaveEnabled = false
+        wasEncrypted = false
         cleanupAllTempFiles()
         processPdf(uri)
     }
 
     fun processPdf(uri: Uri, password: String? = null) {
         viewModelScope.launch {
-            unlockPdfUseCase(uri, password).onSuccess { file ->
-                originalUnlockedFile = file
-                tempPdfFile = file
+            unlockPdfUseCase(uri, password).onSuccess { result ->
+                originalUnlockedFile = result.file
+                tempPdfFile = result.file
                 isSaveVisible = true
                 showPasswordDialog = false
-                _uiEvents.emit(PdfUiEvent.ShowPdf(file))
+                
+                // Only enable save if we actually required a password to unlock it
+                // This prevents the save button from being enabled for standard unencrypted PDFs
+                wasEncrypted = result.wasEncrypted
+                isSaveEnabled = password != null || (result.wasEncrypted && !isInitialLoad(result.file))
+                
+                _uiEvents.emit(PdfUiEvent.ShowPdf(result.file))
             }.onFailure { e ->
                 if (e.message?.contains("Password", ignoreCase = true) == true || e is SecurityException) {
                     isRetryPassword = password != null
                     showPasswordDialog = true
+                    wasEncrypted = true
                 } else {
                     _uiEvents.emit(PdfUiEvent.ShowError(e.message ?: "Unknown error"))
                 }
             }
         }
+    }
+
+    private fun isInitialLoad(file: File): Boolean {
+        // Simple heuristic: if we just picked it and wasEncrypted is true but no password was used,
+        // it might just have an owner password. We'll enable save for that too as it's a 'change'.
+        return false 
     }
 
     fun onCompressQualitySliderChange(quality: Float) {
@@ -81,19 +106,25 @@ class PdfViewModel(
 
     fun startCompressionCalculation() {
         val quality = compressionQuality
+        val requestId = ++latestCompressionRequestId
         compressionJob?.cancel()
-        val sourceFile = tempPdfFile ?: return
+        
+        val sourceFile = originalUnlockedFile ?: return
         
         isCompressing = true
         compressionJob = viewModelScope.launch {
             compressPdfUseCase(sourceFile, quality).onSuccess { file ->
-                compressedPdfFile?.let { if (it.exists()) it.delete() }
-                compressedPdfFile = file
-                compressedFileSize = file.length()
-                isCompressing = false
+                if (requestId == latestCompressionRequestId) {
+                    compressedPdfFile?.let { if (it.exists()) it.delete() }
+                    compressedPdfFile = file
+                    compressedFileSize = file.length()
+                    isCompressing = false
+                } else {
+                    if (file.exists()) file.delete()
+                }
             }.onFailure { e ->
-                if (e !is kotlinx.coroutines.CancellationException) {
-                    _uiEvents.emit(PdfUiEvent.ShowError("Compression preview failed: ${e.message}"))
+                if (requestId == latestCompressionRequestId) {
+                    _uiEvents.emit(PdfUiEvent.ShowError("Compression calculation failed: ${e.message}"))
                     isCompressing = false
                 }
             }
@@ -116,12 +147,39 @@ class PdfViewModel(
             tempPdfFile = newFile
             compressedFileSize = newFile.length()
             compressedPdfFile = null 
+            isSaveEnabled = true // Enable save because a change was applied
             viewModelScope.launch {
                 _uiEvents.emit(PdfUiEvent.ShowPdf(newFile))
                 _uiEvents.emit(PdfUiEvent.ActionSuccess("COMPRESS"))
             }
         }
         showCompressDialog = false
+    }
+
+    fun lockPdf(password: String) {
+        val sourceFile = tempPdfFile ?: return
+        isLocking = true
+        viewModelScope.launch {
+            repository.lockPdf(sourceFile, password).onSuccess { file ->
+                tempPdfFile?.let { current ->
+                    if (current.exists() && current != originalUnlockedFile && current != file) {
+                        current.delete()
+                    }
+                }
+                tempPdfFile = file
+                isSaveEnabled = true
+                isLocking = false
+                showLockDialog = false
+                // CRITICAL FIX: Do NOT emit ShowPdf for a locked file. 
+                // The PdfViewerFragment in alpha15 crashes when trying to show its own password dialog.
+                // We keep the current (unlocked) preview visible for the user.
+                _uiEvents.emit(PdfUiEvent.Toast("PDF password protection applied. Save to export."))
+                _uiEvents.emit(PdfUiEvent.ActionSuccess("LOCK"))
+            }.onFailure { e ->
+                isLocking = false
+                _uiEvents.emit(PdfUiEvent.ShowError("Locking failed: ${e.message}"))
+            }
+        }
     }
 
     fun saveUnprotected(targetUri: Uri) {

@@ -7,4 +7,5 @@ interface PdfRepository {
     suspend fun copyToTempFile(uri: Uri, fileName: String): Result<File>
     suspend fun savePdf(sourceFile: File, targetUri: Uri): Result<Unit>
     suspend fun compressPdf(sourceFile: File, quality: Float): Result<File>
+    suspend fun lockPdf(sourceFile: File, password: String): Result<File>
 }
