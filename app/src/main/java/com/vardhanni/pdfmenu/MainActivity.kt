@@ -82,6 +82,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.FileProvider
 import androidx.fragment.app.FragmentContainerView
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.pdf.viewer.fragment.PdfViewerFragment
@@ -152,7 +154,7 @@ class MainActivity : AppCompatActivity() {
                         is PdfUiEvent.ShowError -> Toast.makeText(this@MainActivity, event.message, Toast.LENGTH_LONG).show()
                         is PdfUiEvent.Toast -> Toast.makeText(this@MainActivity, event.message, Toast.LENGTH_SHORT).show()
                         is PdfUiEvent.ActionSuccess -> {
-                            // Handled via rewarded logic if necessary
+                            // Handled via action success events
                         }
                     }
                 }
@@ -213,16 +215,13 @@ class MainActivity : AppCompatActivity() {
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // PDF Viewer Card with Glassmorphism
                     Card(
                         modifier = Modifier
                             .weight(1f, fill = true)
                             .fillMaxWidth()
                             .border(1.dp, GlassBorder, RoundedCornerShape(24.dp)),
                         shape = RoundedCornerShape(24.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = GlassWhite
-                        ),
+                        colors = CardDefaults.cardColors(containerColor = GlassWhite),
                         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                     ) {
                         Box(modifier = Modifier.fillMaxSize()) {
@@ -233,22 +232,17 @@ class MainActivity : AppCompatActivity() {
                                         fragmentContainerId = containerId
                                     }
                                 },
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(RoundedCornerShape(24.dp))
+                                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp))
                             )
                         }
                     }
 
-                    // Action Card with Glassmorphism
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .border(1.dp, GlassBorder, RoundedCornerShape(32.dp)),
                         shape = RoundedCornerShape(32.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = GlassWhite
-                        ),
+                        colors = CardDefaults.cardColors(containerColor = GlassWhite),
                         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                     ) {
                         Column(
@@ -272,19 +266,13 @@ class MainActivity : AppCompatActivity() {
                                 Text("Choose PDF", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             }
 
-                            AnimatedVisibility(
-                                visible = viewModel.isSaveVisible,
-                                enter = fadeIn(tween(300)) + slideInVertically(initialOffsetY = { it / 2 }),
-                                exit = fadeOut(tween(200)) + slideOutVertically(targetOffsetY = { it / 2 })
-                            ) {
+                            AnimatedVisibility(visible = viewModel.isSaveVisible) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
                                     Button(
-                                        onClick = { 
-                                            showAdIfNecessary { savePdfLauncher.launch("unprotected_document.pdf") }
-                                        },
+                                        onClick = { showAdIfNecessary { savePdfLauncher.launch("unprotected_document.pdf") } },
                                         modifier = Modifier.weight(1f),
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = MaterialTheme.colorScheme.secondary,
@@ -299,10 +287,7 @@ class MainActivity : AppCompatActivity() {
                                     }
 
                                     Button(
-                                        onClick = {
-                                            viewModel.showCompressDialog = true
-                                            viewModel.onCompressDialogOpened()
-                                        },
+                                        onClick = { viewModel.showCompressDialog = true },
                                         modifier = Modifier.weight(1f),
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = MaterialTheme.colorScheme.tertiary,
@@ -333,7 +318,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-
         if (viewModel.showPasswordDialog) {
             AlertDialog(
                 onDismissRequest = { viewModel.showPasswordDialog = false },
@@ -348,7 +332,7 @@ class MainActivity : AppCompatActivity() {
                             IconButton(onClick = { passwordVisible = !passwordVisible }) {
                                 Icon(
                                     imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                    contentDescription = if (passwordVisible) "Hide password" else "Show password"
+                                    contentDescription = "Toggle visibility"
                                 )
                             }
                         },
@@ -361,17 +345,13 @@ class MainActivity : AppCompatActivity() {
                         passwordInput = ""
                         viewModel.showPasswordDialog = false
                         viewModel.currentPdfUri?.let { viewModel.processPdf(it, pass) }
-                    }) {
-                        Text("Open")
-                    }
+                    }) { Text("Open") }
                 },
                 dismissButton = {
                     TextButton(onClick = {
                         viewModel.showPasswordDialog = false
                         passwordInput = ""
-                    }) {
-                        Text("Cancel")
-                    }
+                    }) { Text("Cancel") }
                 }
             )
         }
@@ -394,76 +374,40 @@ class MainActivity : AppCompatActivity() {
                             valueRange = 0.1f..1.0f,
                             modifier = Modifier.fillMaxWidth()
                         )
-                        
-                        Box(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (viewModel.isCompressing) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(20.dp),
-                                        strokeWidth = 2.dp,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    Text("Calculating size...", style = MaterialTheme.typography.bodySmall)
-                                }
-                            } else {
-                                Text(
-                                    "Estimated Size: ${formatFileSize(viewModel.compressedFileSize)}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
+                        if (viewModel.isCompressing) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                Text("Calculating size...", style = MaterialTheme.typography.bodySmall)
                             }
+                        } else {
+                            Text("Estimated Size: ${formatFileSize(viewModel.compressedFileSize)}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                         }
                     }
                 },
                 confirmButton = {
                     TextButton(
-                        onClick = { 
-                            showAdIfNecessary { viewModel.applyCompression() }
-                        },
+                        onClick = { showAdIfNecessary { viewModel.applyCompression() } },
                         enabled = !viewModel.isCompressing
-                    ) {
-                        Text("Apply")
-                    }
+                    ) { Text("Apply") }
                 },
                 dismissButton = {
-                    TextButton(onClick = { viewModel.showCompressDialog = false }) {
-                        Text("Cancel")
-                    }
+                    TextButton(onClick = { viewModel.showCompressDialog = false }) { Text("Cancel") }
                 }
             )
         }
     }
 
     private fun initializeAds() {
-        val configuration = RequestConfiguration.Builder()
-            .setTestDeviceIds(listOf("EMULATOR"))
-            .build()
+        val configuration = RequestConfiguration.Builder().setTestDeviceIds(listOf("EMULATOR")).build()
         MobileAds.setRequestConfiguration(configuration)
         MobileAds.initialize(this)
     }
 
     private fun loadRewardedAd() {
-        RewardedAd.load(
-            this,
-            TEST_REWARDED_AD_UNIT_ID,
-            AdRequest.Builder().build(),
-            object : RewardedAdLoadCallback() {
-                override fun onAdLoaded(ad: RewardedAd) {
-                    rewardedAd = ad
-                }
-
-                override fun onAdFailedToLoad(error: LoadAdError) {
-                    rewardedAd = null
-                }
-            }
-        )
+        RewardedAd.load(this, TEST_REWARDED_AD_UNIT_ID, AdRequest.Builder().build(), object : RewardedAdLoadCallback() {
+            override fun onAdLoaded(ad: RewardedAd) { rewardedAd = ad }
+            override fun onAdFailedToLoad(error: LoadAdError) { rewardedAd = null }
+        })
     }
 
     private fun showAdIfNecessary(onAction: () -> Unit) {
@@ -472,31 +416,12 @@ class MainActivity : AppCompatActivity() {
             onAction()
             return
         }
-
-        val ad = rewardedAd ?: run {
-            // Ad not ready, let user proceed but try to load for next time
-            loadRewardedAd()
-            onAction()
-            return
-        }
-
+        val ad = rewardedAd ?: run { loadRewardedAd(); onAction(); return }
         ad.fullScreenContentCallback = object : FullScreenContentCallback() {
-            override fun onAdDismissedFullScreenContent() {
-                rewardedAd = null
-                loadRewardedAd()
-                onAction()
-            }
-
-            override fun onAdFailedToShowFullScreenContent(adError: com.google.android.gms.ads.AdError) {
-                rewardedAd = null
-                loadRewardedAd()
-                onAction() // Still let user proceed on failure
-            }
+            override fun onAdDismissedFullScreenContent() { rewardedAd = null; loadRewardedAd(); onAction() }
+            override fun onAdFailedToShowFullScreenContent(error: com.google.android.gms.ads.AdError) { rewardedAd = null; loadRewardedAd(); onAction() }
         }
-
-        ad.show(this, OnUserEarnedRewardListener {
-            // User earned the feature
-        })
+        ad.show(this, OnUserEarnedRewardListener { /* Reward earned */ })
     }
 
     @Composable
@@ -504,28 +429,11 @@ class MainActivity : AppCompatActivity() {
         val context = LocalContext.current
         val configuration = LocalConfiguration.current
         val adWidth = (configuration.screenWidthDp - 32).coerceAtLeast(320)
-        val adSize = remember(adWidth) {
-            AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(context, adWidth)
-        }
-        val adView = remember {
-            AdView(context).apply {
-                adUnitId = TEST_BANNER_AD_UNIT_ID
-            }
-        }
-
-        DisposableEffect(adView) {
-            onDispose { adView.destroy() }
-        }
-
-        LaunchedEffect(adSize) {
-            adView.setAdSize(adSize)
-            adView.loadAd(AdRequest.Builder().build())
-        }
-
-        AndroidView(
-            modifier = modifier,
-            factory = { adView }
-        )
+        val adSize = remember(adWidth) { AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(context, adWidth) }
+        val adView = remember { AdView(context).apply { adUnitId = TEST_BANNER_AD_UNIT_ID } }
+        DisposableEffect(adView) { onDispose { adView.destroy() } }
+        LaunchedEffect(adSize) { adView.setAdSize(adSize); adView.loadAd(AdRequest.Builder().build()) }
+        AndroidView(modifier = modifier, factory = { adView })
     }
 
     private fun formatFileSize(size: Long): String {
@@ -539,26 +447,36 @@ class MainActivity : AppCompatActivity() {
         if (fragmentContainerId == View.NO_ID) return
         val fragmentManager = supportFragmentManager
         val fragment = fragmentManager.findFragmentById(fragmentContainerId)
-        if (fragment != null) {
-            fragmentManager.beginTransaction().remove(fragment).commitNow()
-        }
+        if (fragment != null) fragmentManager.beginTransaction().remove(fragment).commitNow()
     }
 
     private fun showPdf(file: File) {
         if (fragmentContainerId == View.NO_ID) return
-
         if (!file.exists() || file.length() == 0L) return
 
         val authority = "${packageName}.provider"
         val contentUri = FileProvider.getUriForFile(this, authority, file)
         grantUriPermission(packageName, contentUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
 
-        val pdfViewerFragment = PdfViewerFragment().apply {
-            documentUri = contentUri
-        }
+        val pdfViewerFragment = PdfViewerFragment()
+        
+        pdfViewerFragment.lifecycle.addObserver(object : LifecycleEventObserver {
+            override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
+                // Wait for START state to ensure view and internal components are ready
+                if (event == Lifecycle.Event.ON_START) {
+                    try {
+                        pdfViewerFragment.documentUri = contentUri
+                        pdfViewerFragment.isToolboxVisible = false
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                    pdfViewerFragment.lifecycle.removeObserver(this)
+                }
+            }
+        })
 
         supportFragmentManager.beginTransaction()
             .replace(fragmentContainerId, pdfViewerFragment)
-            .commitNowAllowingStateLoss()
+            .commitAllowingStateLoss()
     }
 }
