@@ -1,6 +1,5 @@
 package com.vardhanni.pdfmenu
 
-import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.Toast
@@ -9,20 +8,66 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
-import androidx.compose.foundation.layout.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.FileProvider
 import androidx.fragment.app.FragmentContainerView
@@ -30,6 +75,15 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.pdf.viewer.fragment.PdfViewerFragment
+import com.google.android.gms.ads.AdRequest
+import com.google.android.gms.ads.AdSize
+import com.google.android.gms.ads.AdView
+import com.google.android.gms.ads.LoadAdError
+import com.google.android.gms.ads.MobileAds
+import com.google.android.gms.ads.RequestConfiguration
+import com.google.android.gms.ads.interstitial.InterstitialAd
+import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
+import com.google.android.gms.ads.FullScreenContentCallback
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.vardhanni.pdfmenu.data.PdfRepositoryImpl
 import com.vardhanni.pdfmenu.ui.PdfUiEvent
@@ -39,6 +93,15 @@ import java.io.File
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
+
+    private var interstitialAd: InterstitialAd? = null
+    private var previewCountSinceLastInterstitial = 0
+
+    private companion object {
+        const val TEST_BANNER_AD_UNIT_ID = "ca-app-pub-3940256099942544/9214589741"
+        const val TEST_INTERSTITIAL_AD_UNIT_ID = "ca-app-pub-3940256099942544/1033173712"
+        const val INTERSTITIAL_FREQUENCY = 3
+    }
 
     private val viewModel: PdfViewModel by viewModels {
         PdfViewModel.Factory(PdfRepositoryImpl(contentResolver, cacheDir))
@@ -63,12 +126,17 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         PDFBoxResourceLoader.init(applicationContext)
+        initializeAds()
+        loadInterstitialAd()
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.uiEvents.collect { event ->
                     when (event) {
-                        is PdfUiEvent.ShowPdf -> showPdf(event.file)
+                        is PdfUiEvent.ShowPdf -> {
+                            showPdf(event.file)
+                            onPdfPreviewShown()
+                        }
                         is PdfUiEvent.ShowError -> Toast.makeText(this@MainActivity, event.message, Toast.LENGTH_LONG).show()
                         is PdfUiEvent.Toast -> Toast.makeText(this@MainActivity, event.message, Toast.LENGTH_SHORT).show()
                     }
@@ -83,65 +151,150 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     fun PdfMenuScreen(viewModel: PdfViewModel) {
         var passwordInput by remember { mutableStateOf("") }
         var passwordVisible by remember { mutableStateOf(false) }
+        val containerId = remember { View.generateViewId() }
+        val pulseTransition = rememberInfiniteTransition(label = "openButtonPulse")
+        val openButtonScale by pulseTransition.animateFloat(
+            initialValue = 1f,
+            targetValue = 1.05f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1200, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "openButtonScale"
+        )
 
         Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("PDF Menu") },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        titleContentColor = MaterialTheme.colorScheme.onPrimary
-                    )
-                )
-            },
-            floatingActionButton = {
-                Column(
-                    modifier = Modifier.padding(start = 32.dp, bottom = 32.dp),
-                    horizontalAlignment = Alignment.Start
+            containerColor = MaterialTheme.colorScheme.surface
+        ) { innerPadding ->
+            Column(
+                modifier = Modifier
+                    .padding(innerPadding)
+                    .fillMaxSize()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Card(
+                    modifier = Modifier
+                        .weight(1f, fill = true)
+                        .fillMaxWidth(),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                 ) {
-                    if (viewModel.isSaveVisible) {
-                        SmallFloatingActionButton(
-                            onClick = { viewModel.showCompressDialog = true },
-                            modifier = Modifier.padding(bottom = 16.dp),
-                            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        AndroidView(
+                            factory = { context ->
+                                FragmentContainerView(context).apply {
+                                    id = containerId
+                                    fragmentContainerId = containerId
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(28.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f)
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 10.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Button(
+                            onClick = { pickPdfLauncher.launch(arrayOf("application/pdf")) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .scale(if (viewModel.isSaveVisible) 1f else openButtonScale),
+                            shape = RoundedCornerShape(18.dp),
+                            contentPadding = PaddingValues(vertical = 14.dp)
                         ) {
-                            Icon(Icons.Default.Compress, "Compress")
+                            Icon(Icons.Default.Search, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Choose PDF", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                         }
-                        SmallFloatingActionButton(
-                            onClick = { savePdfLauncher.launch("unprotected_document.pdf") },
-                            modifier = Modifier.padding(bottom = 16.dp),
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer
+
+                        AnimatedVisibility(
+                            visible = viewModel.isSaveVisible,
+                            enter = fadeIn(tween(300)) + slideInVertically(initialOffsetY = { it / 2 }),
+                            exit = fadeOut(tween(200)) + slideOutVertically(targetOffsetY = { it / 2 })
                         ) {
-                            Icon(painterResource(android.R.drawable.ic_menu_save), "Save")
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Button(
+                                    onClick = { savePdfLauncher.launch("unprotected_document.pdf") },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                    ),
+                                    shape = RoundedCornerShape(16.dp)
+                                ) {
+                                    Icon(painterResource(android.R.drawable.ic_menu_save), contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Save")
+                                }
+
+                                Button(
+                                    onClick = { viewModel.showCompressDialog = true },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                                    ),
+                                    shape = RoundedCornerShape(16.dp)
+                                ) {
+                                    Icon(Icons.Default.Speed, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Compress")
+                                }
+                            }
+                        }
+
+                        if (!viewModel.isSaveVisible) {
+                            Text(
+                                text = "Open a PDF to unlock advanced actions",
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = TextAlign.Center,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
-                    ExtendedFloatingActionButton(
-                        onClick = { pickPdfLauncher.launch(arrayOf("application/pdf")) },
-                        icon = { Icon(Icons.Default.Search, "Open") },
-                        text = { Text("Open PDF") }
-                    )
                 }
-            },
-            floatingActionButtonPosition = FabPosition.Start
-        ) { innerPadding ->
-            Box(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
-                AndroidView(
-                    factory = { context ->
-                        FragmentContainerView(context).apply {
-                            val generatedId = View.generateViewId()
-                            id = generatedId
-                            fragmentContainerId = generatedId
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                        Text(
+                            text = "Sponsored",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        BannerAd(modifier = Modifier.fillMaxWidth())
+                    }
+                }
             }
         }
+
 
         if (viewModel.showPasswordDialog) {
             AlertDialog(
@@ -212,6 +365,88 @@ class MainActivity : AppCompatActivity() {
                 }
             )
         }
+    }
+
+    private fun initializeAds() {
+        val configuration = RequestConfiguration.Builder()
+            .setTestDeviceIds(listOf("EMULATOR"))
+            .build()
+        MobileAds.setRequestConfiguration(configuration)
+        MobileAds.initialize(this)
+    }
+
+    private fun loadInterstitialAd() {
+        InterstitialAd.load(
+            this,
+            TEST_INTERSTITIAL_AD_UNIT_ID,
+            AdRequest.Builder().build(),
+            object : InterstitialAdLoadCallback() {
+                override fun onAdLoaded(ad: InterstitialAd) {
+                    interstitialAd = ad
+                }
+
+                override fun onAdFailedToLoad(error: LoadAdError) {
+                    interstitialAd = null
+                }
+            }
+        )
+    }
+
+    private fun onPdfPreviewShown() {
+        previewCountSinceLastInterstitial += 1
+        if (previewCountSinceLastInterstitial < INTERSTITIAL_FREQUENCY) return
+
+        val ad = interstitialAd ?: run {
+            loadInterstitialAd()
+            return
+        }
+
+        previewCountSinceLastInterstitial = 0
+        ad.fullScreenContentCallback = object : FullScreenContentCallback() {
+            override fun onAdDismissedFullScreenContent() {
+                interstitialAd = null
+                loadInterstitialAd()
+            }
+
+            override fun onAdFailedToShowFullScreenContent(adError: com.google.android.gms.ads.AdError) {
+                interstitialAd = null
+                loadInterstitialAd()
+            }
+
+            override fun onAdShowedFullScreenContent() {
+                interstitialAd = null
+            }
+        }
+        ad.show(this)
+    }
+
+    @Composable
+    private fun BannerAd(modifier: Modifier = Modifier) {
+        val context = LocalContext.current
+        val configuration = LocalConfiguration.current
+        val adWidth = (configuration.screenWidthDp - 32).coerceAtLeast(320)
+        val adSize = remember(adWidth) {
+            AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(context, adWidth)
+        }
+        val adView = remember {
+            AdView(context).apply {
+                adUnitId = TEST_BANNER_AD_UNIT_ID
+            }
+        }
+
+        DisposableEffect(adView) {
+            onDispose { adView.destroy() }
+        }
+
+        LaunchedEffect(adSize) {
+            adView.setAdSize(adSize)
+            adView.loadAd(AdRequest.Builder().build())
+        }
+
+        AndroidView(
+            modifier = modifier,
+            factory = { adView }
+        )
     }
 
     private fun formatFileSize(size: Long): String {
