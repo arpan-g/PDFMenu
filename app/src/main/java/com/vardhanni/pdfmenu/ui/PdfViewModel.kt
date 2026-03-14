@@ -22,6 +22,7 @@ sealed class PdfUiEvent {
     data class ShowPdf(val file: File) : PdfUiEvent()
     data class ShowError(val message: String) : PdfUiEvent()
     data class Toast(val message: String) : PdfUiEvent()
+    data class ActionSuccess(val action: String) : PdfUiEvent()
 }
 
 class PdfViewModel(
@@ -31,15 +32,8 @@ class PdfViewModel(
 ) : ViewModel() {
 
     var currentPdfUri by mutableStateOf<Uri?>(null)
-    
-    // The main file being viewed/saved. Could be original or compressed.
     var tempPdfFile by mutableStateOf<File?>(null)
-    
-    // The initial unlocked file. We keep this to avoid cumulative quality loss
-    // and because the user wants to keep the original temp file.
     private var originalUnlockedFile: File? = null
-    
-    // The preview file generated during slider interaction.
     var compressedPdfFile by mutableStateOf<File?>(null)
     
     var isSaveVisible by mutableStateOf(false)
@@ -58,7 +52,6 @@ class PdfViewModel(
     fun onFilePicked(uri: Uri) {
         currentPdfUri = uri
         isSaveVisible = false
-        // Complete cleanup when a new file is picked
         cleanupAllTempFiles()
         processPdf(uri)
     }
@@ -89,17 +82,12 @@ class PdfViewModel(
     fun startCompressionCalculation() {
         val quality = compressionQuality
         compressionJob?.cancel()
-        
-        // We always compress from the ORIGINAL file to maintain quality
-        // and avoid "compressing a compressed file".
         val sourceFile = originalUnlockedFile ?: return
         
         isCompressing = true
         compressionJob = viewModelScope.launch {
             compressPdfUseCase(sourceFile, quality).onSuccess { file ->
-                // Delete the PREVIOUS preview file before updating
                 compressedPdfFile?.let { if (it.exists()) it.delete() }
-                
                 compressedPdfFile = file
                 compressedFileSize = file.length()
                 isCompressing = false
@@ -114,20 +102,16 @@ class PdfViewModel(
 
     fun applyCompression() {
         compressedPdfFile?.let { newFile ->
-            // If the current tempPdfFile is NOT the original, we should delete it
-            // as it was a previously 'applied' compression result.
             tempPdfFile?.let { current ->
                 if (current.exists() && current != originalUnlockedFile && current != newFile) {
                     current.delete()
                 }
             }
-            
             tempPdfFile = newFile
-            // Clear reference so it doesn't get deleted in startCompressionCalculation
             compressedPdfFile = null 
-            
             viewModelScope.launch {
                 _uiEvents.emit(PdfUiEvent.ShowPdf(newFile))
+                _uiEvents.emit(PdfUiEvent.ActionSuccess("COMPRESS"))
             }
         }
         showCompressDialog = false
@@ -138,6 +122,7 @@ class PdfViewModel(
         viewModelScope.launch {
             repository.savePdf(sourceFile, targetUri).onSuccess {
                 _uiEvents.emit(PdfUiEvent.Toast("PDF saved successfully!"))
+                _uiEvents.emit(PdfUiEvent.ActionSuccess("SAVE"))
             }.onFailure { e ->
                 _uiEvents.emit(PdfUiEvent.ShowError("Save failed: ${e.message}"))
             }

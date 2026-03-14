@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -60,7 +61,11 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
@@ -80,6 +85,16 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.pdf.viewer.fragment.PdfViewerFragment
+import com.google.android.gms.ads.AdRequest
+import com.google.android.gms.ads.AdSize
+import com.google.android.gms.ads.AdView
+import com.google.android.gms.ads.LoadAdError
+import com.google.android.gms.ads.MobileAds
+import com.google.android.gms.ads.RequestConfiguration
+import com.google.android.gms.ads.rewarded.RewardedAd
+import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
+import com.google.android.gms.ads.FullScreenContentCallback
+import com.google.android.gms.ads.OnUserEarnedRewardListener
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.vardhanni.pdfmenu.data.PdfRepositoryImpl
 import com.vardhanni.pdfmenu.ui.PdfUiEvent
@@ -94,6 +109,14 @@ import java.io.File
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
+
+    private var rewardedAd: RewardedAd? = null
+    private var freeActionsRemaining = 1
+
+    private companion object {
+        const val TEST_BANNER_AD_UNIT_ID = "ca-app-pub-3940256099942544/9214589741"
+        const val TEST_REWARDED_AD_UNIT_ID = "ca-app-pub-3940256099942544/5224354917"
+    }
 
     private val viewModel: PdfViewModel by viewModels {
         PdfViewModel.Factory(PdfRepositoryImpl(contentResolver, cacheDir))
@@ -118,6 +141,8 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         PDFBoxResourceLoader.init(applicationContext)
+        initializeAds()
+        loadRewardedAd()
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -126,6 +151,9 @@ class MainActivity : AppCompatActivity() {
                         is PdfUiEvent.ShowPdf -> showPdf(event.file)
                         is PdfUiEvent.ShowError -> Toast.makeText(this@MainActivity, event.message, Toast.LENGTH_LONG).show()
                         is PdfUiEvent.Toast -> Toast.makeText(this@MainActivity, event.message, Toast.LENGTH_SHORT).show()
+                        is PdfUiEvent.ActionSuccess -> {
+                            // Handled via rewarded logic if necessary
+                        }
                     }
                 }
             }
@@ -165,7 +193,18 @@ class MainActivity : AppCompatActivity() {
                 )
         ) {
             Scaffold(
-                containerColor = Color.Transparent
+                containerColor = Color.Transparent,
+                bottomBar = {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(bottom = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        BannerAd(modifier = Modifier.fillMaxWidth())
+                    }
+                }
             ) { innerPadding ->
                 Column(
                     modifier = Modifier
@@ -243,7 +282,9 @@ class MainActivity : AppCompatActivity() {
                                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
                                     Button(
-                                        onClick = { savePdfLauncher.launch("unprotected_document.pdf") },
+                                        onClick = { 
+                                            showAdIfNecessary { savePdfLauncher.launch("unprotected_document.pdf") }
+                                        },
                                         modifier = Modifier.weight(1f),
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = MaterialTheme.colorScheme.secondary,
@@ -380,7 +421,9 @@ class MainActivity : AppCompatActivity() {
                 },
                 confirmButton = {
                     TextButton(
-                        onClick = { viewModel.applyCompression() },
+                        onClick = { 
+                            showAdIfNecessary { viewModel.applyCompression() }
+                        },
                         enabled = !viewModel.isCompressing
                     ) {
                         Text("Apply")
@@ -393,6 +436,93 @@ class MainActivity : AppCompatActivity() {
                 }
             )
         }
+    }
+
+    private fun initializeAds() {
+        val configuration = RequestConfiguration.Builder()
+            .setTestDeviceIds(listOf("EMULATOR"))
+            .build()
+        MobileAds.setRequestConfiguration(configuration)
+        MobileAds.initialize(this)
+    }
+
+    private fun loadRewardedAd() {
+        RewardedAd.load(
+            this,
+            TEST_REWARDED_AD_UNIT_ID,
+            AdRequest.Builder().build(),
+            object : RewardedAdLoadCallback() {
+                override fun onAdLoaded(ad: RewardedAd) {
+                    rewardedAd = ad
+                }
+
+                override fun onAdFailedToLoad(error: LoadAdError) {
+                    rewardedAd = null
+                }
+            }
+        )
+    }
+
+    private fun showAdIfNecessary(onAction: () -> Unit) {
+        if (freeActionsRemaining > 0) {
+            freeActionsRemaining--
+            onAction()
+            return
+        }
+
+        val ad = rewardedAd ?: run {
+            // Ad not ready, let user proceed but try to load for next time
+            loadRewardedAd()
+            onAction()
+            return
+        }
+
+        ad.fullScreenContentCallback = object : FullScreenContentCallback() {
+            override fun onAdDismissedFullScreenContent() {
+                rewardedAd = null
+                loadRewardedAd()
+                onAction()
+            }
+
+            override fun onAdFailedToShowFullScreenContent(adError: com.google.android.gms.ads.AdError) {
+                rewardedAd = null
+                loadRewardedAd()
+                onAction() // Still let user proceed on failure
+            }
+        }
+
+        ad.show(this, OnUserEarnedRewardListener {
+            // User earned the feature
+        })
+    }
+
+    @Composable
+    private fun BannerAd(modifier: Modifier = Modifier) {
+        val context = LocalContext.current
+        val configuration = LocalConfiguration.current
+        val adWidth = (configuration.screenWidthDp - 32).coerceAtLeast(320)
+        val adSize = remember(adWidth) {
+            AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(context, adWidth)
+        }
+        val adView = remember {
+            AdView(context).apply {
+                adUnitId = TEST_BANNER_AD_UNIT_ID
+            }
+        }
+
+        DisposableEffect(adView) {
+            onDispose { adView.destroy() }
+        }
+
+        LaunchedEffect(adSize) {
+            adView.setAdSize(adSize)
+            adView.loadAd(AdRequest.Builder().build())
+        }
+
+        AndroidView(
+            modifier = modifier,
+            factory = { adView }
+        )
     }
 
     private fun formatFileSize(size: Long): String {

@@ -18,6 +18,7 @@ lifecycle = "2.10.0"
 foundationLayout = "1.10.5"
 uiText = "1.10.4"
 benchmarkTraceprocessor = "1.4.1"
+googleMobileAds = "24.7.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -45,6 +46,7 @@ androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "l
 androidx-compose-foundation-layout = { group = "androidx.compose.foundation", name = "foundation-layout", version.ref = "foundationLayout" }
 androidx-compose-ui-text = { group = "androidx.compose.ui", name = "ui-text", version.ref = "uiText" }
 androidx-benchmark-traceprocessor = { group = "androidx.benchmark", name = "benchmark-traceprocessor", version.ref = "benchmarkTraceprocessor" }
+play-services-ads = { group = "com.google.android.gms", name = "play-services-ads", version.ref = "googleMobileAds" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
