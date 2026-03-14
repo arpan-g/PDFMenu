@@ -2,6 +2,7 @@ package com.vardhanni.pdfmenu
 
 import android.content.Intent
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.view.View
 import android.widget.Toast
 import androidx.activity.compose.setContent
@@ -114,6 +115,7 @@ class MainActivity : AppCompatActivity() {
 
     private var rewardedAd: RewardedAd? = null
     private var freeActionsRemaining = 1
+    private var currentFileName: String? = null
 
     private companion object {
         const val TEST_BANNER_AD_UNIT_ID = "ca-app-pub-3940256099942544/9214589741"
@@ -128,6 +130,7 @@ class MainActivity : AppCompatActivity() {
 
     private val pickPdfLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let {
+            currentFileName = getFileName(it)
             clearPdfViewer()
             viewModel.onFilePicked(it)
         }
@@ -153,9 +156,7 @@ class MainActivity : AppCompatActivity() {
                         is PdfUiEvent.ShowPdf -> showPdf(event.file)
                         is PdfUiEvent.ShowError -> Toast.makeText(this@MainActivity, event.message, Toast.LENGTH_LONG).show()
                         is PdfUiEvent.Toast -> Toast.makeText(this@MainActivity, event.message, Toast.LENGTH_SHORT).show()
-                        is PdfUiEvent.ActionSuccess -> {
-                            // Handled via action success events
-                        }
+                        is PdfUiEvent.ActionSuccess -> { }
                     }
                 }
             }
@@ -272,7 +273,14 @@ class MainActivity : AppCompatActivity() {
                                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
                                     Button(
-                                        onClick = { showAdIfNecessary { savePdfLauncher.launch("unprotected_document.pdf") } },
+                                        onClick = { 
+                                            showAdIfNecessary { 
+                                                val name = currentFileName?.removeSuffix(".pdf") ?: "document"
+                                                val isCompressed = viewModel.tempPdfFile?.name?.contains("compressed") == true
+                                                val suffix = if (isCompressed) "_compressed" else "_unlocked"
+                                                savePdfLauncher.launch("$name$suffix.pdf")
+                                            } 
+                                        },
                                         modifier = Modifier.weight(1f),
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = MaterialTheme.colorScheme.secondary,
@@ -397,6 +405,29 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun getFileName(uri: android.net.Uri): String? {
+        var result: String? = null
+        if (uri.scheme == "content") {
+            val cursor = contentResolver.query(uri, null, null, null, null)
+            try {
+                if (cursor != null && cursor.moveToFirst()) {
+                    val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (index != -1) result = cursor.getString(index)
+                }
+            } finally {
+                cursor?.close()
+            }
+        }
+        if (result == null) {
+            result = uri.path
+            val cut = result?.lastIndexOf('/') ?: -1
+            if (cut != -1) {
+                result = result?.substring(cut + 1)
+            }
+        }
+        return result
+    }
+
     private fun initializeAds() {
         val configuration = RequestConfiguration.Builder().setTestDeviceIds(listOf("EMULATOR")).build()
         MobileAds.setRequestConfiguration(configuration)
@@ -421,7 +452,7 @@ class MainActivity : AppCompatActivity() {
             override fun onAdDismissedFullScreenContent() { rewardedAd = null; loadRewardedAd(); onAction() }
             override fun onAdFailedToShowFullScreenContent(error: com.google.android.gms.ads.AdError) { rewardedAd = null; loadRewardedAd(); onAction() }
         }
-        ad.show(this, OnUserEarnedRewardListener { /* Reward earned */ })
+        ad.show(this, OnUserEarnedRewardListener { })
     }
 
     @Composable
@@ -459,10 +490,8 @@ class MainActivity : AppCompatActivity() {
         grantUriPermission(packageName, contentUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
 
         val pdfViewerFragment = PdfViewerFragment()
-        
         pdfViewerFragment.lifecycle.addObserver(object : LifecycleEventObserver {
             override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
-                // Wait for START state to ensure view and internal components are ready
                 if (event == Lifecycle.Event.ON_START) {
                     try {
                         pdfViewerFragment.documentUri = contentUri
