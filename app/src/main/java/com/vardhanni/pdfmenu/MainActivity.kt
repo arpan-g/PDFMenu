@@ -299,7 +299,10 @@ class MainActivity : AppCompatActivity() {
                                     }
 
                                     Button(
-                                        onClick = { viewModel.showCompressDialog = true },
+                                        onClick = {
+                                            viewModel.showCompressDialog = true
+                                            viewModel.onCompressDialogOpened()
+                                        },
                                         modifier = Modifier.weight(1f),
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = MaterialTheme.colorScheme.tertiary,
@@ -543,23 +546,19 @@ class MainActivity : AppCompatActivity() {
 
     private fun showPdf(file: File) {
         if (fragmentContainerId == View.NO_ID) return
-        
-        // 1. Verify file exists
+
         if (!file.exists() || file.length() == 0L) return
 
-        // 2. Prepare URI and grant permission explicitly
         val authority = "${packageName}.provider"
         val contentUri = FileProvider.getUriForFile(this, authority, file)
         grantUriPermission(packageName, contentUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
 
-        // 3. Create fresh fragment and replace
-        val pdfViewerFragment = PdfViewerFragment()
-        
+        val pdfViewerFragment = PdfViewerFragment().apply {
+            documentUri = contentUri
+        }
+
         supportFragmentManager.beginTransaction()
             .replace(fragmentContainerId, pdfViewerFragment)
             .commitNowAllowingStateLoss()
-
-        // 4. Set document properties after it's attached
-        pdfViewerFragment.documentUri = contentUri
     }
 }

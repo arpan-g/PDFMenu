@@ -82,7 +82,7 @@ class PdfViewModel(
     fun startCompressionCalculation() {
         val quality = compressionQuality
         compressionJob?.cancel()
-        val sourceFile = originalUnlockedFile ?: return
+        val sourceFile = tempPdfFile ?: return
         
         isCompressing = true
         compressionJob = viewModelScope.launch {
@@ -100,6 +100,12 @@ class PdfViewModel(
         }
     }
 
+    fun onCompressDialogOpened() {
+        if (compressedPdfFile == null && !isCompressing) {
+            startCompressionCalculation()
+        }
+    }
+
     fun applyCompression() {
         compressedPdfFile?.let { newFile ->
             tempPdfFile?.let { current ->
@@ -108,6 +114,7 @@ class PdfViewModel(
                 }
             }
             tempPdfFile = newFile
+            compressedFileSize = newFile.length()
             compressedPdfFile = null 
             viewModelScope.launch {
                 _uiEvents.emit(PdfUiEvent.ShowPdf(newFile))
