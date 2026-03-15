@@ -41,16 +41,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material.icons.filled.Save
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -87,7 +77,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -110,8 +100,8 @@ import com.google.android.gms.ads.AdView
 import com.google.android.gms.ads.LoadAdError
 import com.google.android.gms.ads.MobileAds
 import com.google.android.gms.ads.RequestConfiguration
-import com.google.android.gms.ads.rewarded.RewardedAd
-import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
+import com.google.android.gms.ads.rewardedinterstitial.RewardedInterstitialAd
+import com.google.android.gms.ads.rewardedinterstitial.RewardedInterstitialAdLoadCallback
 import com.google.android.gms.ads.FullScreenContentCallback
 import com.google.android.gms.ads.OnUserEarnedRewardListener
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
@@ -126,15 +116,19 @@ import com.vardhanni.pdfmenu.ui.theme.PDFMenuTheme
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
+import kotlin.math.log10
+import kotlin.math.pow
 
 class MainActivity : AppCompatActivity() {
 
-    private var rewardedAd: RewardedAd? = null
+    private var rewardedInterstitialAd: RewardedInterstitialAd? = null
     private var lastGrantedUri: Uri? = null
 
     private companion object {
+        const val BANNER_AD_UNIT_ID ="ca-app-pub-3229732191140592/4967730807"
+        const val REWARDED_INTERSTITIAL_AD_UNIT_ID ="ca-app-pub-3229732191140592/4289543144"
         const val TEST_BANNER_AD_UNIT_ID = "ca-app-pub-3940256099942544/9214589741"
-        const val TEST_REWARDED_AD_UNIT_ID = "ca-app-pub-3940256099942544/5224354917"
+        const val TEST_REWARDED_INTERSTITIAL_AD_UNIT_ID = "ca-app-pub-3940256099942544/5354046379"
     }
 
     private val viewModel: PdfViewModel by viewModels {
@@ -162,7 +156,7 @@ class MainActivity : AppCompatActivity() {
         enableEdgeToEdge()
         PDFBoxResourceLoader.init(applicationContext)
         initializeAds()
-        loadRewardedAd()
+        loadRewardedInterstitialAd()
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -268,7 +262,7 @@ class MainActivity : AppCompatActivity() {
                                     verticalArrangement = Arrangement.Center
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Description,
+                                        painter = painterResource(R.drawable.ic_description),
                                         contentDescription = null,
                                         modifier = Modifier.size(64.dp),
                                         tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
@@ -318,7 +312,7 @@ class MainActivity : AppCompatActivity() {
                                     contentColor = MaterialTheme.colorScheme.onPrimary
                                 )
                             ) {
-                                Icon(Icons.Default.Search, contentDescription = null)
+                                Icon(painterResource(R.drawable.ic_search), contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(8.dp))
                                 Text("Choose PDF", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             }
@@ -342,7 +336,7 @@ class MainActivity : AppCompatActivity() {
                                         ),
                                         contentPadding = PaddingValues(vertical = 12.dp)
                                     ) {
-                                        Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Icon(painterResource(R.drawable.ic_build), contentDescription = null, modifier = Modifier.size(18.dp))
                                         Spacer(Modifier.width(8.dp))
                                         Text("Tools")
                                     }
@@ -375,7 +369,7 @@ class MainActivity : AppCompatActivity() {
                                         ),
                                         contentPadding = PaddingValues(vertical = 12.dp)
                                     ) {
-                                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Icon(painterResource(R.drawable.ic_save), contentDescription = null, modifier = Modifier.size(18.dp))
                                         Spacer(Modifier.width(8.dp))
                                         Text("Save")
                                     }
@@ -422,7 +416,7 @@ class MainActivity : AppCompatActivity() {
                     HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
                     
                     ToolItem(
-                        icon = Icons.Default.LockOpen,
+                        icon = painterResource(R.drawable.ic_lock_open),
                         title = "Unlock PDF",
                         description = "Permanently remove password protection from this file",
                         enabled = viewModel.wasEncrypted,
@@ -434,7 +428,7 @@ class MainActivity : AppCompatActivity() {
                     )
 
                     ToolItem(
-                        icon = Icons.Default.Lock,
+                        icon = painterResource(R.drawable.ic_lock),
                         title = "Lock PDF",
                         description = "Apply a secure password to protect this document",
                         enabled = true,
@@ -445,7 +439,7 @@ class MainActivity : AppCompatActivity() {
                     )
 
                     ToolItem(
-                        icon = Icons.Default.Speed,
+                        icon = painterResource(R.drawable.ic_speed),
                         title = "Compress PDF",
                         description = "Reduce file size by optimizing internal images",
                         enabled = true,
@@ -472,8 +466,9 @@ class MainActivity : AppCompatActivity() {
                         trailingIcon = {
                             IconButton(onClick = { passwordVisible = !passwordVisible }) {
                                 Icon(
-                                    imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                    contentDescription = "Toggle visibility"
+                                    painter = if (passwordVisible) painterResource(R.drawable.ic_visibility_off) else painterResource(R.drawable.ic_visibility),
+                                    contentDescription = "Toggle visibility",
+                                    modifier = Modifier.size(24.dp)
                                 )
                             }
                         },
@@ -510,8 +505,9 @@ class MainActivity : AppCompatActivity() {
                         trailingIcon = {
                             IconButton(onClick = { passwordVisible = !passwordVisible }) {
                                 Icon(
-                                    imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                    contentDescription = "Toggle visibility"
+                                    painter = if (passwordVisible) painterResource(R.drawable.ic_visibility_off) else painterResource(R.drawable.ic_visibility),
+                                    contentDescription = "Toggle visibility",
+                                    modifier = Modifier.size(24.dp)
                                 )
                             }
                         },
@@ -581,7 +577,7 @@ class MainActivity : AppCompatActivity() {
 
     @Composable
     private fun ToolItem(
-        icon: ImageVector,
+        icon: Painter,
         title: String,
         description: String,
         enabled: Boolean,
@@ -598,7 +594,7 @@ class MainActivity : AppCompatActivity() {
                 modifier = Modifier.padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
                 Spacer(Modifier.width(16.dp))
                 Column {
                     Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp)
@@ -637,11 +633,16 @@ class MainActivity : AppCompatActivity() {
         MobileAds.initialize(this)
     }
 
-    private fun loadRewardedAd() {
-        RewardedAd.load(this, TEST_REWARDED_AD_UNIT_ID, AdRequest.Builder().build(), object : RewardedAdLoadCallback() {
-            override fun onAdLoaded(ad: RewardedAd) { rewardedAd = ad }
-            override fun onAdFailedToLoad(error: LoadAdError) { rewardedAd = null }
-        })
+    private fun loadRewardedInterstitialAd() {
+        RewardedInterstitialAd.load(this, REWARDED_INTERSTITIAL_AD_UNIT_ID,
+            AdRequest.Builder().build(), object : RewardedInterstitialAdLoadCallback() {
+                override fun onAdLoaded(ad: RewardedInterstitialAd) {
+                    rewardedInterstitialAd = ad
+                }
+                override fun onAdFailedToLoad(loadAdError: LoadAdError) {
+                    rewardedInterstitialAd = null
+                }
+            })
     }
 
     private fun showAdIfNecessary(onAction: () -> Unit) {
@@ -650,10 +651,10 @@ class MainActivity : AppCompatActivity() {
             onAction()
             return
         }
-        val ad = rewardedAd ?: run { loadRewardedAd(); onAction(); return }
+        val ad = rewardedInterstitialAd ?: run { loadRewardedInterstitialAd(); onAction(); return }
         ad.fullScreenContentCallback = object : FullScreenContentCallback() {
-            override fun onAdDismissedFullScreenContent() { rewardedAd = null; loadRewardedAd(); onAction() }
-            override fun onAdFailedToShowFullScreenContent(error: com.google.android.gms.ads.AdError) { rewardedAd = null; loadRewardedAd(); onAction() }
+            override fun onAdDismissedFullScreenContent() { rewardedInterstitialAd = null; loadRewardedInterstitialAd(); onAction() }
+            override fun onAdFailedToShowFullScreenContent(error: com.google.android.gms.ads.AdError) { rewardedInterstitialAd = null; loadRewardedInterstitialAd(); onAction() }
         }
         ad.show(this, OnUserEarnedRewardListener { })
     }
@@ -664,7 +665,7 @@ class MainActivity : AppCompatActivity() {
         val configuration = LocalConfiguration.current
         val adWidth = (configuration.screenWidthDp - 32).coerceAtLeast(320)
         val adSize = remember(adWidth) { AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(context, adWidth) }
-        val adView = remember { AdView(context).apply { adUnitId = TEST_BANNER_AD_UNIT_ID } }
+        val adView = remember { AdView(context).apply { adUnitId = BANNER_AD_UNIT_ID } }
         DisposableEffect(adView) { onDispose { adView.destroy() } }
         LaunchedEffect(adSize) { adView.setAdSize(adSize); adView.loadAd(AdRequest.Builder().build()) }
         AndroidView(modifier = modifier, factory = { adView })
@@ -673,8 +674,8 @@ class MainActivity : AppCompatActivity() {
     private fun formatFileSize(size: Long): String {
         if (size <= 0) return "0 B"
         val units = arrayOf("B", "KB", "MB", "GB")
-        val digitGroups = (Math.log10(size.toDouble()) / Math.log10(1024.0)).toInt()
-        return String.format(Locale.US, "%.1f %s", size / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
+        val digitGroups = (log10(size.toDouble()) / log10(1024.0)).toInt()
+        return String.format(Locale.US, "%.1f %s", size / 1024.0.pow(digitGroups.toDouble()), units[digitGroups])
     }
 
     private fun clearPdfViewer() {
